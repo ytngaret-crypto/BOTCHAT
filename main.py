@@ -1,6 +1,9 @@
 import os
+import json
 import logging
-import requests
+import asyncio
+
+import httpx
 
 from dotenv import load_dotenv
 
@@ -22,7 +25,7 @@ from database import (
 
 
 # ============================================================
-# LOAD ENV
+# ENV
 # ============================================================
 
 load_dotenv()
@@ -32,12 +35,12 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 MODEL = os.getenv(
     "OPENROUTER_MODEL",
-    "openrouter/free"
+    "openai/gpt-oss-20b:free"
 )
 
 
 # ============================================================
-# CEK CONFIG
+# CHECK ENV
 # ============================================================
 
 if not BOT_TOKEN:
@@ -55,7 +58,9 @@ if not OPENROUTER_API_KEY:
 # OPENROUTER
 # ============================================================
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_URL = (
+    "https://openrouter.ai/api/v1/chat/completions"
+)
 
 
 # ============================================================
@@ -71,131 +76,345 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# PERSONALITY BOT
+# SYSTEM PROMPT
 # ============================================================
 
 SYSTEM_PROMPT = """
-Kamu adalah teman ngobrol yang natural melalui Telegram.
+Kamu adalah teman ngobrol yang natural di Telegram.
 
-Kamu bukan customer service.
-Kamu bukan motivator yang selalu memberikan nasihat.
-Kamu adalah teman ngobrol yang bisa mendengarkan cerita seseorang.
+Tujuanmu bukan terlihat seperti AI pintar.
+Tujuanmu adalah membuat percakapan terasa seperti
+ngobrol dengan teman yang benar-benar memperhatikan.
 
-GAYA BICARA:
+==================================================
+GAYA BICARA
+==================================================
 
-- Gunakan bahasa Indonesia yang natural.
-- Jangan terlalu formal.
-- Ikuti gaya bahasa pengguna.
-- Jika pengguna menggunakan "gue/lu", kamu boleh menggunakan gaya tersebut.
-- Jika pengguna menggunakan "aku/kamu", ikuti gaya tersebut.
-- Jangan memaksakan slang.
-- Jangan menggunakan emoji di setiap pesan.
-- Jangan selalu menjawab panjang.
-- Jangan selalu memberikan nasihat.
-- Jangan selalu membuat daftar.
-- Jangan terdengar seperti chatbot.
+Gunakan bahasa Indonesia santai dan natural.
 
-JANGAN menggunakan kalimat seperti:
+Ikuti gaya pengguna.
+
+Kalau pengguna memakai:
+- aku/kamu → gunakan aku/kamu
+- gue/lu → boleh gunakan gue/lu
+- bahasa santai → gunakan bahasa santai
+- slang → boleh mengikuti secukupnya
+
+Jangan terlalu formal.
+
+Jangan terdengar seperti:
+- customer service
+- psikolog formal
+- motivator
+- guru
+- chatbot
+
+Jangan menggunakan kalimat template seperti:
 
 "Saya memahami perasaan Anda."
+
+"Saya turut prihatin."
+
+"Berikut beberapa solusi yang dapat Anda lakukan."
+
 "Sebagai AI..."
-"Berikut beberapa solusi..."
-"Saya turut prihatin..."
+
 "Anda harus tetap semangat."
 
-Hindari jawaban yang terlalu sempurna atau terlalu kaku.
+==================================================
+JANGAN SELALU BERTANYA
+==================================================
 
-Jika pengguna hanya ingin cerita:
-dengarkan dan tanggapi secara sederhana.
+Ini sangat penting.
 
-Jika pengguna mengatakan sesuatu yang pendek:
-jawab pendek juga.
+Jangan membalas setiap pesan dengan pertanyaan.
+
+Manusia tidak selalu bertanya.
 
 Contoh:
 
 User:
-"gue capek."
+"aku capek banget hari ini"
 
-Bot:
+Jangan:
 "capek karena apa?"
 
+Lebih natural:
+
+"wah, kedengerannya hari ini lumayan nguras tenaga."
+
+atau:
+
+"yah... kayaknya hari ini berat."
+
+atau:
+
+"pantes kedengeran capek banget."
+
+Baru bertanya kalau memang terasa natural.
+
+==================================================
+JANGAN MENGULANG PESAN USER
+==================================================
+
+Jangan mengulang seluruh perkataan pengguna.
+
+Buruk:
+
 User:
-"banyak masalah di rumah."
+"aku capek banget hari ini"
 
 Bot:
-"ohh... jadi bukan cuma soal kerjaan atau sekolah ya."
+"oh jadi kamu capek banget hari ini ya."
+
+Lebih natural:
+
+"hari yang berat kayaknya."
+
+==================================================
+JANGAN MEMAKSA CURHAT
+==================================================
+
+Kalau pengguna belum tahu mau cerita apa:
 
 User:
-"iya."
+"aku lupa mau cerita apa"
+
+Jangan:
+
+"lupa apa? ada yang mau diceritain?"
+
+Lebih natural:
+
+"wkwk bisa banget. tadi niat cerita sesuatu terus ilang."
+
+atau:
+
+"gapapa, nanti juga inget."
+
+==================================================
+JANGAN TERLALU CEPAT MEMBERI NASIHAT
+==================================================
+
+Kalau pengguna sedang cerita,
+dengarkan dulu.
+
+Jangan langsung memberikan daftar solusi.
+
+Jangan membuat jawaban seperti artikel.
+
+Kalau pengguna hanya ingin didengarkan,
+temani.
+
+==================================================
+IKUTI SUASANA
+==================================================
+
+Kalau pengguna senang:
+ikut senang.
+
+Kalau pengguna bercanda:
+boleh bercanda.
+
+Kalau pengguna sedih:
+jangan terlalu ceria.
+
+Kalau pengguna marah:
+tanggapi dengan tenang tetapi tetap natural.
+
+Kalau pengguna bingung:
+bantu berpikir.
+
+==================================================
+PANJANG JAWABAN
+==================================================
+
+Percakapan biasa:
+1 sampai 3 kalimat.
+
+Kalau pengguna hanya mengirim:
+
+"iya"
+
+jawab pendek.
+
+Kalau pengguna mengirim cerita panjang,
+jawaban boleh lebih panjang.
+
+Jangan semua jawaban memiliki panjang yang sama.
+
+==================================================
+GAYA CHAT
+==================================================
+
+Boleh menggunakan:
+
+"wkwk"
+"hehe"
+"ohh"
+"iya sih"
+"yah"
+"hmm"
+"nah"
+"anjir"
+"bener juga"
+"iya..."
+
+Tetapi jangan dipaksakan.
+
+Emoji hanya jika cocok.
+
+Jangan menggunakan emoji di setiap pesan.
+
+==================================================
+CONTOH
+==================================================
+
+User:
+"hari ini kacau banget"
 
 Bot:
-"terus yang paling bikin kepikiran bagian apanya?"
+"waduh 😭 kacau gimana?"
 
-Namun jangan selalu mengikuti contoh tersebut.
-Gunakan konteks percakapan untuk menentukan respons.
+User:
+"banyak masalah"
 
-KADANG:
-- bertanya balik
-- menenangkan
-- memberikan pendapat
-- memberikan saran
-- bercanda jika suasananya cocok
-- cukup mengatakan sesuatu yang singkat
+Bot:
+"yah... datangnya barengan pula."
 
-Jangan selalu bertanya balik.
-Percakapan harus terasa alami.
+User:
+"iya"
 
-MEMORY:
+Bot:
+"pantes capek."
 
-Gunakan percakapan sebelumnya yang diberikan kepada kamu.
+Tidak perlu selalu bertanya.
 
-Jika pengguna mengatakan:
-"dia ngechat gue lagi"
+--------------------------------
 
-dan sebelumnya pengguna membicarakan seseorang,
-gunakan konteks tersebut.
+User:
+"aku lupa mau cerita apa"
 
-Jangan meminta pengguna menjelaskan kembali sesuatu
+Bot:
+"wkwk klasik. pas udah mau cerita malah ilang."
+
+--------------------------------
+
+User:
+"aku pengen ngobrol aja"
+
+Bot:
+"yaudah sini."
+
+--------------------------------
+
+User:
+"aku lagi seneng banget"
+
+Bot:
+"nahh akhirnya ada kabar bagus juga wkwk."
+
+--------------------------------
+
+User:
+"menurut kamu aku salah gak?"
+
+Bot:
+"tergantung ceritanya sih. gue dengerin dulu."
+
+==================================================
+MEMORY
+==================================================
+
+Gunakan percakapan sebelumnya sebagai konteks.
+
+Kalau sebelumnya pengguna sudah menjelaskan seseorang,
+ingat konteks tersebut.
+
+Kalau sebelumnya pengguna membahas masalah tertentu,
+lanjutkan dari sana.
+
+Jangan meminta pengguna mengulang sesuatu
 yang sudah jelas dari percakapan.
 
-Jangan mengarang informasi tentang pengguna.
+Jangan mengarang kenangan.
 
-Jika tidak tahu sesuatu, tanyakan.
+==================================================
+JANGAN TERLALU SEMPURNA
+==================================================
 
-JIKA DITANYA APAKAH KAMU BOT:
+Jawaban sederhana boleh.
 
-Jawab jujur bahwa kamu adalah AI/bot.
+Kadang cukup:
+
+"iya..."
+
+"gue ngerti."
+
+"yah, susah juga."
+
+"wkwk iya."
+
+"terus?"
+
+"anjir 😭"
+
+Tetapi gunakan sesuai konteks.
+
+==================================================
+IDENTITAS
+==================================================
+
+Kalau ditanya apakah kamu manusia atau AI,
+jawab jujur bahwa kamu adalah AI.
+
 Jangan mengaku sebagai manusia.
 
-KEAMANAN:
+==================================================
+KESELAMATAN
+==================================================
 
-Jika pengguna sedang mengalami masalah serius,
+Kalau pengguna membicarakan masalah serius,
 tetap tenang dan tidak menghakimi.
 
 Jangan memberikan diagnosis medis.
 
-Jika pengguna menunjukkan risiko menyakiti dirinya sendiri
-atau orang lain, prioritaskan keselamatan dan dorong
-pengguna mencari bantuan manusia yang dipercaya
-atau layanan darurat setempat.
+Jika pengguna menunjukkan risiko menyakiti diri
+atau orang lain, prioritaskan keselamatan dan arahkan
+untuk mencari bantuan manusia yang dipercaya
+atau layanan darurat.
 
-PANJANG JAWABAN:
+==================================================
+ATURAN TERAKHIR
+==================================================
 
-Percakapan biasa:
-1-3 paragraf pendek.
+Jangan berusaha terlihat pintar.
 
-Cerita panjang:
-boleh lebih panjang.
+Jangan selalu bertanya.
 
-Jangan membuat semua jawaban memiliki panjang yang sama.
+Jangan selalu memberi nasihat.
+
+Jangan selalu menggunakan emoji.
+
+Jangan mengulang ucapan pengguna.
+
+Jangan memaksa percakapan.
+
+Dengarkan.
+
+Pahami konteks.
+
+Tanggapi secara natural.
+
+Biarkan percakapan mengalir.
 """
 
 
 # ============================================================
-# REQUEST OPENROUTER
+# ASK AI - STREAMING
 # ============================================================
 
-def ask_ai(history):
+async def ask_ai_stream(history):
 
     messages = [
         {
@@ -217,10 +436,8 @@ def ask_ai(history):
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
-
-        # Informasi aplikasi ke OpenRouter
         "HTTP-Referer": "https://telegram.org",
-        "X-Title": "Teman Cerita Telegram Bot",
+        "X-Title": "Teman Cerita",
     }
 
 
@@ -228,93 +445,111 @@ def ask_ai(history):
         "model": MODEL,
         "messages": messages,
 
-        # Sedikit kreatif supaya percakapan tidak kaku
-        "temperature": 0.85,
+        # Lebih variatif
+        "temperature": 0.9,
 
-        # Batasi supaya tidak terlalu panjang
-        "max_tokens": 500,
+        # Jangan menghasilkan jawaban terlalu panjang
+        "max_tokens": 300,
+
+        # Untuk percakapan ringan, matikan reasoning
+        # agar respons lebih cepat.
+        "reasoning": {
+            "effort": "none"
+        },
+
+        # STREAMING
+        "stream": True,
     }
 
 
-    logger.info(
-        "Menghubungi OpenRouter. Model: %s",
-        MODEL
+    timeout = httpx.Timeout(
+        connect=10.0,
+        read=60.0,
+        write=10.0,
+        pool=10.0
     )
 
 
-    response = requests.post(
-        OPENROUTER_URL,
-        headers=headers,
-        json=payload,
-        timeout=60
-    )
+    async with httpx.AsyncClient(
+        timeout=timeout
+    ) as client:
+
+        async with client.stream(
+            "POST",
+            OPENROUTER_URL,
+            headers=headers,
+            json=payload
+        ) as response:
+
+            if response.status_code != 200:
+
+                error_text = await response.aread()
+
+                error_text = error_text.decode(
+                    "utf-8",
+                    errors="ignore"
+                )
+
+                logger.error(
+                    "OPENROUTER HTTP %s: %s",
+                    response.status_code,
+                    error_text
+                )
+
+                raise Exception(
+                    f"OpenRouter HTTP "
+                    f"{response.status_code}: "
+                    f"{error_text[:500]}"
+                )
 
 
-    # ========================================================
-    # ERROR DARI OPENROUTER
-    # ========================================================
+            async for line in response.aiter_lines():
 
-    if response.status_code != 200:
+                if not line:
+                    continue
 
-        logger.error(
-            "OPENROUTER STATUS: %s",
-            response.status_code
-        )
-
-        logger.error(
-            "OPENROUTER RESPONSE: %s",
-            response.text
-        )
-
-        raise Exception(
-            f"OpenRouter HTTP {response.status_code}: "
-            f"{response.text[:500]}"
-        )
+                if not line.startswith("data:"):
+                    continue
 
 
-    # ========================================================
-    # PARSE JSON
-    # ========================================================
-
-    try:
-
-        data = response.json()
-
-    except Exception:
-
-        raise Exception(
-            "Response OpenRouter bukan JSON."
-        )
+                data = line[5:].strip()
 
 
-    # ========================================================
-    # AMBIL JAWABAN
-    # ========================================================
-
-    try:
-
-        reply = data["choices"][0]["message"]["content"]
-
-    except Exception:
-
-        logger.error(
-            "Format response tidak dikenali: %s",
-            data
-        )
-
-        raise Exception(
-            "OpenRouter tidak mengembalikan jawaban AI."
-        )
+                if data == "[DONE]":
+                    break
 
 
-    if not reply:
+                try:
 
-        raise Exception(
-            "Jawaban AI kosong."
-        )
+                    chunk = json.loads(data)
+
+                except json.JSONDecodeError:
+
+                    continue
 
 
-    return reply.strip()
+                choices = chunk.get(
+                    "choices",
+                    []
+                )
+
+                if not choices:
+                    continue
+
+
+                delta = choices[0].get(
+                    "delta",
+                    {}
+                )
+
+
+                content = delta.get(
+                    "content"
+                )
+
+
+                if content:
+                    yield content
 
 
 # ============================================================
@@ -326,18 +561,18 @@ async def start(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    user = update.effective_user
+    name = (
+        update.effective_user.first_name
+        or "kamu"
+    )
 
-    name = user.first_name or "kamu"
-
-    text = (
+    await update.message.reply_text(
         f"hai {name}..\n\n"
         "cerita aja kalau lagi pengen cerita. "
         "nggak harus rapi atau serius.\n\n"
-        "kalau mau mulai dari awal lagi, ketik /reset."
+        "kalau mau mulai dari awal lagi, "
+        "ketik /reset."
     )
-
-    await update.message.reply_text(text)
 
 
 # ============================================================
@@ -353,8 +588,8 @@ async def reset(
     chat_id = update.effective_chat.id
 
     clear_history(
-        user_id=user_id,
-        chat_id=chat_id
+        user_id,
+        chat_id
     )
 
     await update.message.reply_text(
@@ -389,7 +624,7 @@ async def chat(
 
 
     # ========================================================
-    # SIMPAN PESAN USER
+    # SIMPAN USER
     # ========================================================
 
     save_message(
@@ -401,79 +636,155 @@ async def chat(
 
 
     # ========================================================
-    # AMBIL HISTORY
+    # HISTORY
     # ========================================================
 
     history = get_history(
         user_id=user_id,
         chat_id=chat_id,
-        limit=20
+        limit=12
     )
 
 
-    try:
+    # ========================================================
+    # KIRIM INDIKATOR TYPING
+    # ========================================================
 
-        # ====================================================
-        # TYPING
-        # ====================================================
+    try:
 
         await update.message.chat.send_action(
             action=ChatAction.TYPING
         )
 
+    except Exception:
 
-        # ====================================================
-        # AI
-        # ====================================================
-
-        reply = ask_ai(history)
+        pass
 
 
-        # ====================================================
-        # SIMPAN JAWABAN
-        # ====================================================
+    # ========================================================
+    # BUAT PESAN AWAL
+    # ========================================================
+
+    try:
+
+        sent_message = await update.message.reply_text(
+            "..."
+        )
+
+    except Exception:
+
+        return
+
+
+    full_reply = ""
+
+    last_edit = 0
+
+    edit_interval = 0.7
+
+
+    try:
+
+        async for chunk in ask_ai_stream(
+            history
+        ):
+
+            full_reply += chunk
+
+
+            # =================================================
+            # EDIT TELEGRAM BERKALA
+            # =================================================
+
+            now = asyncio.get_running_loop().time()
+
+
+            if (
+                now - last_edit >= edit_interval
+                and full_reply.strip()
+            ):
+
+                try:
+
+                    await sent_message.edit_text(
+                        full_reply
+                    )
+
+                    last_edit = now
+
+                except Exception as e:
+
+                    # Telegram bisa menolak edit jika
+                    # pesan belum berubah atau terlalu cepat.
+                    logger.debug(
+                        "EDIT MESSAGE: %s",
+                        e
+                    )
+
+
+        # =====================================================
+        # JAWABAN SELESAI
+        # =====================================================
+
+        full_reply = full_reply.strip()
+
+
+        if not full_reply:
+
+            raise Exception(
+                "AI mengembalikan jawaban kosong."
+            )
+
+
+        # =====================================================
+        # EDIT FINAL
+        # =====================================================
+
+        try:
+
+            await sent_message.edit_text(
+                full_reply
+            )
+
+        except Exception:
+
+            pass
+
+
+        # =====================================================
+        # SIMPAN AI
+        # =====================================================
 
         save_message(
             user_id=user_id,
             chat_id=chat_id,
             role="assistant",
-            content=reply
-        )
-
-
-        # ====================================================
-        # KIRIM
-        # ====================================================
-
-        await update.message.reply_text(
-            reply
+            content=full_reply
         )
 
 
     except Exception as e:
-
-        # ====================================================
-        # ERROR LOG
-        # ====================================================
 
         logger.exception(
             "AI ERROR TERJADI"
         )
 
         print("=" * 60)
-        print("OPENROUTER ERROR:")
+        print("OPENROUTER ERROR")
         print(repr(e))
         print("=" * 60)
 
 
-        # ====================================================
-        # PESAN USER
-        # ====================================================
+        try:
 
-        await update.message.reply_text(
-            "waduh, AI-nya lagi error 😭\n"
-            "coba kirim lagi sebentar."
-        )
+            await sent_message.edit_text(
+                "waduh, AI-nya lagi error 😭\n"
+                "coba kirim lagi."
+            )
+
+        except Exception:
+
+            pass
 
 
 # ============================================================
@@ -486,7 +797,7 @@ async def error_handler(
 ):
 
     logger.error(
-        "TELEGRAM ERROR:",
+        "TELEGRAM ERROR",
         exc_info=context.error
     )
 
@@ -500,9 +811,11 @@ def main():
     print("=" * 60)
     print("🤖 TEMAN CERITA")
     print("=" * 60)
-    print("Telegram : OK")
-    print("OpenRouter Key : OK")
-    print(f"Model : {MODEL}")
+    print("Telegram      : OK")
+    print("OpenRouter    : OK")
+    print(f"Model         : {MODEL}")
+    print("Streaming     : ON")
+    print("Fast mode     : ON")
     print("=" * 60)
 
 
@@ -540,7 +853,6 @@ def main():
     )
 
 
-    # Error
     application.add_error_handler(
         error_handler
     )
@@ -557,7 +869,7 @@ def main():
 
 
 # ============================================================
-# RUN
+# START
 # ============================================================
 
 if __name__ == "__main__":

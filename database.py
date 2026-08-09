@@ -47,7 +47,7 @@ def get_connection():
 
 
 # ============================================================
-# SAVE MESSAGE
+# SAVE
 # ============================================================
 
 def save_message(
@@ -61,8 +61,7 @@ def save_message(
 
     conn.execute(
         """
-        INSERT INTO messages
-        (
+        INSERT INTO messages (
             user_id,
             chat_id,
             role,
@@ -85,13 +84,13 @@ def save_message(
 
 
 # ============================================================
-# GET HISTORY
+# HISTORY
 # ============================================================
 
 def get_history(
     user_id,
     chat_id,
-    limit=20
+    limit=12
 ):
 
     conn = get_connection()
@@ -114,17 +113,13 @@ def get_history(
 
     conn.close()
 
-
-    # Database mengambil dari terbaru.
-    # Kita balik supaya AI menerima urutan lama -> baru.
     rows.reverse()
-
 
     return rows
 
 
 # ============================================================
-# CLEAR HISTORY
+# RESET
 # ============================================================
 
 def clear_history(
@@ -151,7 +146,7 @@ def clear_history(
 
 
 # ============================================================
-# MESSAGE COUNT
+# COUNT
 # ============================================================
 
 def get_message_count(

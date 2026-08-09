@@ -4,7 +4,7 @@ from datetime import datetime
 
 
 # ============================================================
-# DATABASE PATH
+# DATABASE
 # ============================================================
 
 BASE_DIR = os.path.dirname(
@@ -47,7 +47,7 @@ def get_connection():
 
 
 # ============================================================
-# SAVE
+# SAVE MESSAGE
 # ============================================================
 
 def save_message(
@@ -80,11 +80,12 @@ def save_message(
     )
 
     conn.commit()
+
     conn.close()
 
 
 # ============================================================
-# HISTORY
+# GET HISTORY
 # ============================================================
 
 def get_history(
@@ -113,13 +114,15 @@ def get_history(
 
     conn.close()
 
+
+    # Dari lama -> baru
     rows.reverse()
 
     return rows
 
 
 # ============================================================
-# RESET
+# CLEAR HISTORY
 # ============================================================
 
 def clear_history(
@@ -142,6 +145,7 @@ def clear_history(
     )
 
     conn.commit()
+
     conn.close()
 
 

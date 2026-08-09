@@ -4,7 +4,7 @@ from datetime import datetime
 
 
 # ============================================================
-# DATABASE
+# DATABASE PATH
 # ============================================================
 
 BASE_DIR = os.path.dirname(
@@ -33,6 +33,7 @@ def get_connection():
         CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             created_at TEXT NOT NULL
@@ -46,11 +47,12 @@ def get_connection():
 
 
 # ============================================================
-# SAVE
+# SAVE MESSAGE
 # ============================================================
 
 def save_message(
     user_id,
+    chat_id,
     role,
     content
 ):
@@ -62,14 +64,16 @@ def save_message(
         INSERT INTO messages
         (
             user_id,
+            chat_id,
             role,
             content,
             created_at
         )
-        VALUES (?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?)
         """,
         (
             user_id,
+            chat_id,
             role,
             content,
             datetime.now().isoformat()
@@ -81,11 +85,12 @@ def save_message(
 
 
 # ============================================================
-# HISTORY
+# GET HISTORY
 # ============================================================
 
 def get_history(
     user_id,
+    chat_id,
     limit=20
 ):
 
@@ -96,27 +101,36 @@ def get_history(
         SELECT role, content
         FROM messages
         WHERE user_id = ?
+        AND chat_id = ?
         ORDER BY id DESC
         LIMIT ?
         """,
         (
             user_id,
+            chat_id,
             limit
         )
     ).fetchall()
 
     conn.close()
 
+
+    # Database mengambil dari terbaru.
+    # Kita balik supaya AI menerima urutan lama -> baru.
     rows.reverse()
+
 
     return rows
 
 
 # ============================================================
-# RESET
+# CLEAR HISTORY
 # ============================================================
 
-def clear_history(user_id):
+def clear_history(
+    user_id,
+    chat_id
+):
 
     conn = get_connection()
 
@@ -124,9 +138,42 @@ def clear_history(user_id):
         """
         DELETE FROM messages
         WHERE user_id = ?
+        AND chat_id = ?
         """,
-        (user_id,)
+        (
+            user_id,
+            chat_id
+        )
     )
 
     conn.commit()
     conn.close()
+
+
+# ============================================================
+# MESSAGE COUNT
+# ============================================================
+
+def get_message_count(
+    user_id,
+    chat_id
+):
+
+    conn = get_connection()
+
+    result = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM messages
+        WHERE user_id = ?
+        AND chat_id = ?
+        """,
+        (
+            user_id,
+            chat_id
+        )
+    ).fetchone()
+
+    conn.close()
+
+    return result[0]
